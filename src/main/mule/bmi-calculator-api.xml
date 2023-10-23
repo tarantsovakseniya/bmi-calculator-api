@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<mule xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit-soap="http://www.mulesoft.org/schema/mule/apikit-soap" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/apikit-soap http://www.mulesoft.org/schema/mule/apikit-soap/current/mule-apikit-soap.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+    <http:listener-config name="api-httpListenerConfig">
+        <http:listener-connection host="0.0.0.0" port="8081"/>
+    </http:listener-config>
+    <apikit-soap:config name="soapkit-config" port="CalculatorSoap" service="BMIService" wsdlLocation="bmicalculator.wsdl" soapVersion="SOAP12" inboundValidationEnabled="true">
+		<apikit-soap:namespace-prefixes >
+			<apikit-soap:namespace-prefix key="soapenv" value="http://schemas.xmlsoap.org/soap/envelope/" />
+		</apikit-soap:namespace-prefixes>
+	</apikit-soap:config>
+    <flow name="api-main">
+        <http:listener config-ref="api-httpListenerConfig" path="/calculator">
+            <http:response statusCode="#[attributes.additionalTransportData.statusCode default 200]">
+                <http:headers><![CDATA[#[attributes.protocolHeaders default {}]]]></http:headers>
+            </http:response>
+            <http:error-response statusCode="#[attributes.additionalTransportData.statusCode default 500]">
+                <http:body><![CDATA[#[payload]]]></http:body>
+                <http:headers><![CDATA[#[attributes.protocolHeaders default {}]]]></http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit-soap:router config-ref="soapkit-config">
+            <apikit-soap:attributes><![CDATA[#[%dw 2.0
+              output application/java
+              ---
+              {
+                  headers: attributes.headers,
+                  method: attributes.method,
+                  queryString: attributes.queryString
+            }]]]></apikit-soap:attributes>
+        </apikit-soap:router>
+    </flow>
+    <flow name="CalculateAdultBMI:\soapkit-config">
+        <logger level="INFO" doc:name="Start" doc:id="5e26d5e3-064c-4c45-98ce-70f92a4f2a91" message="#[correlationId] - Start calculate adult's BMI"/>
+		<set-variable value='#[payload.body]' doc:name="VL SET body" doc:id="f78322d4-4c94-4815-9a47-3e095c81869e" variableName="body" mimeType="application/xml"/>
+		<ee:transform doc:name="PL SET Prepare response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/java
+
+//variables to calculate bmi (Body Mass Index)
+var weight = vars.body.CalculateAdultBMIRequest.weight
+var height = vars.body.CalculateAdultBMIRequest.height
+
+//bmi calculation
+var bmi = weight/(height pow 2)
+
+//function to get a category of the World Health Organization's' based on bmi number
+fun getCategory(bmi) = bmi match {
+  case bmi if bmi < 18.5 -> "underweight"
+  case bmi if bmi < 25 -> "normal weight"
+  case bmi if bmi < 30 -> "pre-obesity"
+  case bmi if bmi < 35 -> "obesity class I"
+  case bmi if bmi < 40 -> "obesity class II"
+  else -> "obesity class III"
+} 
+---
+{
+    body: {
+        'CalculateAdultBMIResponse': {
+        	//format bmi to 2 decimals with rounding mode to round towards the "nearest neighbor"
+            bmi: bmi as String {format: "0.00", roundMode:"HALF_EVEN"},
+            category: getCategory(bmi)
+        }
+   } write "application/xml"
+} ]]>
+                </ee:set-payload>
+            </ee:message>
+        </ee:transform>
+		<logger level="INFO" doc:name="End" doc:id="212d4c1f-4002-47be-9060-b65db8191af8" message="#[correlationId] - Start calculate adult's BMI"/>
+    </flow>
+</mule>
